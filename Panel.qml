@@ -540,8 +540,8 @@ text: root.scanning ? "Scanning agents…"
         // ---- Search field.
         TextField {
           id: searchField
-          width: parent.width - Style.space(32)
           x: Style.space(16)
+          width: parent.width - Style.space(32)
           height: Style.space(40)
           visible: root.sessions.length > 0
           foreground: root.fg
@@ -611,8 +611,6 @@ text: root.scanning ? "Scanning agents…"
           }
         }
 
-        PanelSeparator { width: parent.width }
-
         // ---- Session rows (scrollable, pinned + recency grouped).
         ListView {
           id: sessionList
@@ -663,7 +661,7 @@ text: root.scanning ? "Scanning agents…"
               readonly property color brand: String(row.session.color || "") !== ""
                 ? row.session.color : Color.accent
               anchors.left: parent.left
-              anchors.leftMargin: Style.space(14)
+              anchors.leftMargin: Style.space(16)
               anchors.top: parent.top
               anchors.topMargin: Style.space(8)
               readonly property bool hasLogo: String(row.session.iconFile || "") !== ""
@@ -864,10 +862,12 @@ text: root.scanning ? "Scanning agents…"
 
           Text {
             id: footerHints
+            width: parent.width - Style.space(32)
             anchors.right: parent.right
             anchors.rightMargin: Style.space(16)
             anchors.verticalCenter: parent.verticalCenter
-            text: "↵ resume · f pin · p peek · o folder · y copy · d delete ×2 · ←/→ agent · / search · r rescan · esc"
+            wrapMode: Text.WordWrap
+            text: "↵ resume   f pin   p peek   o folder   y copy id+title   d×2 delete   ←/→ agent   / search   r rescan   esc close"
             color: root.dimmed
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.caption
