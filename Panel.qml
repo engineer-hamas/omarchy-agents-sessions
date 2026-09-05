@@ -394,7 +394,7 @@ text: root.scanning ? "Scanning agents…"
           accent: Color.accent
           placeholderText: "Search by title, agent, or path"
           verticalPadding: 8
-          leftPadding: horizontalPadding + Style.space(22)
+          leftPadding: horizontalPadding + Style.space(30)
           rightPadding: horizontalPadding
             + (searchCluster.visible ? searchCluster.width + Style.space(12) : 0)
           activeFocusOnTab: false
@@ -412,10 +412,10 @@ text: root.scanning ? "Scanning agents…"
             anchors.leftMargin: Style.space(12)
             anchors.verticalCenter: parent.verticalCenter
             z: 1
-            text: "⌕"
-            color: root.faint
+            text: "\uf002"
+            color: root.dimmed
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.body
+            font.pixelSize: Style.font.iconLarge
           }
 
           Row {
