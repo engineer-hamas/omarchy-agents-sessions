@@ -110,6 +110,8 @@ omarchy plugin add https://github.com/engineer-hamas/omarchy-agents-sessions.git
 | Click a row / `Enter` | Resume that session in a terminal |
 | Arrows | Move selection (list auto-scrolls) |
 | `←`/`→` or pill click | Filter by agent |
+| `/` or click the field | Search by title, agent, or path (combines with agent filter) |
+| `Esc` in search / `Clear` | Clear the query; `Enter` returns to the list |
 | `p` | Peek at the transcript |
 | `o` | Open the session's folder |
 | `y` | Copy the session id |

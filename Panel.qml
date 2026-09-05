@@ -16,6 +16,7 @@ Panel {
   property var sessions: []
   property var agents: []
   property string filter: "all"
+  property string query: ""
   property int selectedIndex: 0
   property bool scanning: false
   property bool scanLimited: false
@@ -37,6 +38,11 @@ Panel {
       sessionList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
   }
   onFilterChanged: root.confirmingDelete = false
+  onQueryChanged: {
+    root.confirmingDelete = false
+    if (root.selectedIndex >= root.shown.length)
+      root.selectedIndex = Math.max(0, root.shown.length - 1)
+  }
 
   readonly property string helper: Qt.resolvedUrl("list-sessions").toString().replace(/^file:\/\//, "")
   readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
@@ -44,16 +50,37 @@ Panel {
   readonly property color faint: Qt.darker(fg, 1.9)
 
   readonly property var shown: {
-    var list = root.filter === "all"
-      ? root.sessions
-      : root.sessions.filter(s => s.agent === root.filter)
+    var q = root.query.trim().toLowerCase()
+    var list = root.sessions.filter(function (s) {
+      if (root.filter !== "all" && s.agent !== root.filter) return false
+      return root.sessionMatches(s, q)
+    })
     return list
+  }
+
+  function sessionMatches(s, q) {
+    if (q === "") return true
+    var terms = q.split(/\s+/)
+    for (var i = 0; i < terms.length; i++) {
+      var t = terms[i]
+      if (t === "") continue
+      if (String(s.title).toLowerCase().indexOf(t) !== -1) continue
+      if (String(s.agent).toLowerCase().indexOf(t) !== -1) continue
+      if (String(s.dir || "").toLowerCase().indexOf(t) !== -1) continue
+      if (String(s.meta || "").toLowerCase().indexOf(t) !== -1) continue
+      return false
+    }
+    return true
   }
 
   function open() {
     root.controller.show()
     root.hoverArmed = false
     hoverArm.restart()
+    if (typeof searchField !== "undefined") {
+      searchField.text = ""
+      searchField.focus = false
+    }
     refresh()
   }
   function openFromHotkey() { open() }
@@ -74,6 +101,17 @@ Panel {
       root.scanning = true
       listProc.running = true
     }
+  }
+
+  function openSearch() {
+    if (typeof searchField === "undefined") return
+    if (panel.focusTarget) panel.focusTarget.focus = false
+    searchField.forceActiveFocus()
+  }
+
+  function closeSearch() {
+    if (searchField.activeFocus) searchField.focus = false
+    if (panel.focusTarget) panel.focusTarget.forceActiveFocus()
   }
 
   function cycleFilter(step) {
@@ -232,6 +270,7 @@ Panel {
         if (text === "r") root.refresh()
         else if (text === "p") root.runAction("peek", root.selected())
         else if (text === "o") root.runAction("folder", root.selected())
+        else if (text === "/") root.openSearch()
         else if (text === "y") root.runAction("copy", root.selected())
         else if (text === "d") root.requestDelete()
       }
@@ -265,12 +304,10 @@ Panel {
 
             Text {
               width: parent.width
-              text: root.scanning ? "Scanning agents…"
+text: root.scanning ? "Scanning agents…"
                 : (root.scanNotice !== "" ? root.scanNotice
                   : (root.sessions.length === 0 ? "No sessions found"
-                  : (root.agents.length > 4
-                    ? root.sessions.length + " sessions · " + root.agents.length + " agents"
-                    : root.agents.map(a => a.count + " " + a.name).join(" · "))))
+                    : root.sessions.length + " sessions · " + root.agents.length + " agents"))
               elide: Text.ElideRight
               color: root.dimmed
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
@@ -340,6 +377,80 @@ Panel {
                 onClicked: {
                   root.filter = parent.modelData.agent
                   root.selectedIndex = 0
+                }
+              }
+            }
+          }
+        }
+
+        // ---- Search field.
+        TextField {
+          id: searchField
+          width: parent.width - Style.space(32)
+          x: Style.space(16)
+          height: Style.space(40)
+          visible: root.sessions.length > 0
+          foreground: root.fg
+          accent: Color.accent
+          placeholderText: "Search by title, agent, or path"
+          verticalPadding: 8
+          leftPadding: horizontalPadding + Style.space(22)
+          rightPadding: horizontalPadding
+            + (searchCluster.visible ? searchCluster.width + Style.space(12) : 0)
+          activeFocusOnTab: false
+          selectByMouse: true
+          onTextChanged: root.query = text
+          onAccepted: root.closeSearch()
+          Keys.onEscapePressed: {
+            searchField.text = ""
+            root.closeSearch()
+          }
+
+          Text {
+            id: searchGlyph
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(12)
+            anchors.verticalCenter: parent.verticalCenter
+            z: 1
+            text: "⌕"
+            color: root.faint
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.body
+          }
+
+          Row {
+            id: searchCluster
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(12)
+            anchors.verticalCenter: parent.verticalCenter
+            z: 1
+            spacing: Style.space(10)
+            visible: searchField.text.length > 0
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.shown.length + "/" + root.sessions.length
+              color: root.dimmed
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            Text {
+              id: searchClear
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Clear"
+              color: searchClearArea.containsMouse ? Color.accent : root.dimmed
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+
+              MouseArea {
+                id: searchClearArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  searchField.text = ""
+                  searchField.focus = false
                 }
               }
             }
@@ -554,7 +665,9 @@ Panel {
           width: parent.width - Style.space(32)
           x: Style.space(16)
           visible: !root.scanning && root.shown.length === 0
-          text: "Nothing here yet — sessions appear after you use an agent."
+          text: root.query.trim() !== ""
+          ? "No sessions match your search."
+          : "Nothing here yet — sessions appear after you use an agent."
           color: root.dimmed
           font.family: root.bar ? root.bar.fontFamily : Style.font.family
           font.pixelSize: Style.font.bodySmall
@@ -572,7 +685,7 @@ Panel {
             anchors.right: parent.right
             anchors.rightMargin: Style.space(16)
             anchors.verticalCenter: parent.verticalCenter
-            text: "↵ resume · p peek · o folder · y copy · d delete ×2 · ←/→ agent · r rescan · esc"
+            text: "↵ resume · p peek · o folder · y copy · d delete ×2 · ←/→ agent · / search · r rescan · esc"
             color: root.dimmed
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.caption
