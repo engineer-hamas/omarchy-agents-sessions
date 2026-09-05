@@ -6,8 +6,10 @@
   list-sessions peek   AGENT ID    -> show the transcript in a floating terminal
   list-sessions peek-render AGENT ID  (internal: prints the transcript)
   list-sessions folder AGENT ID    -> open the session's directory
-  list-sessions copy   AGENT ID    -> copy the session id to the clipboard
+  list-sessions copy   AGENT ID    -> copy the session id + title to the clipboard
   list-sessions delete AGENT ID    -> permanently delete the session
+  list-sessions pin    AGENT ID    -> toggle the session's pinned state
+  list-sessions pins               -> print the pinned keys as a JSON array
 """
 import datetime
 import glob
@@ -1260,10 +1262,57 @@ def folder(agent, sid):
 
 
 def copy_id(agent, sid):
+    s = find(agent, sid) or {"title": ""}
+    text = str(sid) + "\n" + str(s.get("title") or "")
     try:
-        subprocess.run(["wl-copy", "--", str(sid)], check=False, timeout=2)
+        subprocess.run(["wl-copy", "--", text], check=False, timeout=2)
     except subprocess.TimeoutExpired:
         pass
+
+
+def pins_dir():
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state")
+    return os.path.join(base, "engineer-hamas.agents-sessions")
+
+
+def pins_path():
+    return os.path.join(pins_dir(), "pins.json")
+
+
+def read_pins():
+    try:
+        with open(pins_path(), "r", encoding="utf-8") as f:
+            value = json.load(f)
+        if isinstance(value, list):
+            return [str(key) for key in value]
+    except (OSError, ValueError):
+        pass
+    return []
+
+
+def write_pins(keys):
+    try:
+        os.makedirs(pins_dir(), exist_ok=True)
+        tmp = pins_path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(keys, f)
+        os.replace(tmp, pins_path())
+    except OSError:
+        pass
+
+
+def pin_toggle(agent, sid):
+    key = "%s:%s" % (agent, sid)
+    keys = read_pins()
+    if key in keys:
+        keys = [existing for existing in keys if existing != key]
+    else:
+        keys.append(key)
+    write_pins(keys)
+
+
+def pins_list():
+    sys.stdout.write(json.dumps(read_pins()))
 
 
 def delete(agent, sid):
@@ -1288,11 +1337,14 @@ def delete(agent, sid):
 
 
 ACTIONS = {"resume": resume, "peek": peek, "peek-render": peek_render,
-           "folder": folder, "copy": copy_id, "delete": delete}
+           "folder": folder, "copy": copy_id, "delete": delete,
+           "pin": pin_toggle}
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         sys.stdout.write(encode_payload(collect()))
+    elif len(sys.argv) == 2 and sys.argv[1] == "pins":
+        pins_list()
     elif len(sys.argv) >= 4 and sys.argv[1] in ACTIONS and sys.argv[2] in SCANNERS:
         if not valid_id(sys.argv[2], sys.argv[3]):
             sys.exit(2)

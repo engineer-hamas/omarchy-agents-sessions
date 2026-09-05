@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "engineer-hamas.agents-sessions",
-  "name": "Session Browser",
-  "version": "1.2.0",
+  "name": "Agents Sessions",
+  "version": "1.0.0",
   "author": "Hamas Munawar",
   "description": "Browse previous sessions from every AI coding agent on this machine (Claude Code, Codex, opencode, Copilot, Pi, Gemini, Grok) and resume any of them in a terminal.",
   "kinds": ["bar-widget"],
@@ -10,7 +10,7 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Session Browser",
+    "displayName": "Agents Sessions",
     "description": "Click to open the session list; Enter or click a row resumes it in a terminal",
     "category": "System",
     "defaultSection": "right",

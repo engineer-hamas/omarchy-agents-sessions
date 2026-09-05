@@ -23,6 +23,16 @@ Panel {
   property string scanNotice: ""
   property bool confirmingDelete: false
   property int copiedIndex: -1
+  // Grouped display rows: {type:"header"|"divider"|"session", ...}. Session
+  // rows carry their session in `data`; selection indexes into these rows.
+  property var rows: []
+  property int matchCount: 0
+  // Pinned session keys ("agent:id"), persisted by list-sessions.
+  property var pins: []
+  property bool pinsLoaded: false
+  // The session key selected before a rebuild/refresh, so selection survives
+  // regroupings and rescans.
+  property string lastKey: ""
   // Rows slide under a stationary cursor while the panel animates open;
   // only treat hover as selection when the pointer itself has moved.
   property real lastMouseX: -1
@@ -32,16 +42,24 @@ Panel {
   // the selection from the keyboard default (top row).
   property bool hoverArmed: false
 
+  Component.onCompleted: root.loadPins()
+
   onSelectedIndexChanged: {
     root.confirmingDelete = false
+    var picked = root.selected()
+    root.lastKey = picked ? root.keyFor(picked) : ""
     if (typeof sessionList !== "undefined" && sessionList.count > 0)
       sessionList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
   }
-  onFilterChanged: root.confirmingDelete = false
+  onSessionsChanged: root.rebuild()
+  onPinsChanged: root.rebuild()
+  onFilterChanged: {
+    root.confirmingDelete = false
+    root.rebuild()
+  }
   onQueryChanged: {
     root.confirmingDelete = false
-    if (root.selectedIndex >= root.shown.length)
-      root.selectedIndex = Math.max(0, root.shown.length - 1)
+    root.rebuild()
   }
 
   readonly property string helper: Qt.resolvedUrl("list-sessions").toString().replace(/^file:\/\//, "")
@@ -49,13 +67,103 @@ Panel {
   readonly property color dimmed: Qt.darker(fg, 1.4)
   readonly property color faint: Qt.darker(fg, 1.9)
 
-  readonly property var shown: {
+  function keyFor(s) { return s.agent + ":" + s.id }
+
+  function isPinned(s) { return root.pins.indexOf(root.keyFor(s)) !== -1 }
+
+  function startOfDay(sec) {
+    var d = new Date(Number(sec) * 1000)
+    return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000)
+  }
+
+  function bucketLabel(sec) {
+    var mt = Number(sec)
+    var now = Math.floor(Date.now() / 1000)
+    if (mt >= root.startOfDay(now)) return "Today"
+    if (mt >= root.startOfDay(now - 86400)) return "Yesterday"
+    if (mt >= now - 7 * 86400) return "Past week"
+    return "Earlier"
+  }
+
+  function buildRows() {
     var q = root.query.trim().toLowerCase()
-    var list = root.sessions.filter(function (s) {
+    var pool = root.sessions.filter(function (s) {
       if (root.filter !== "all" && s.agent !== root.filter) return false
       return root.sessionMatches(s, q)
     })
-    return list
+    root.matchCount = pool.length
+    var pinned = []
+    var rest = []
+    for (var a = 0; a < pool.length; a++) {
+      if (root.isPinned(pool[a])) pinned.push(pool[a])
+      else rest.push(pool[a])
+    }
+    var out = []
+    if (pinned.length > 0) {
+      out.push({type: "header", label: "Pinned"})
+      for (var b = 0; b < pinned.length; b++)
+        out.push({type: "session", data: pinned[b]})
+    }
+    var order = ["Today", "Yesterday", "Past week", "Earlier"]
+    var buckets = {}
+    for (var g = 0; g < order.length; g++) buckets[order[g]] = []
+    for (var c = 0; c < rest.length; c++)
+      buckets[root.bucketLabel(rest[c].mtime)].push(rest[c])
+    for (var d = 0; d < order.length; d++) {
+      var bucket = order[d]
+      if (buckets[bucket].length === 0) continue
+      if (out.length > 0) out.push({type: "divider"})
+      out.push({type: "header", label: bucket + " · " + buckets[bucket].length})
+      for (var e = 0; e < buckets[bucket].length; e++)
+        out.push({type: "session", data: buckets[bucket][e]})
+    }
+    return out
+  }
+
+  function rebuild() {
+    var keep = root.selected()
+    root.rows = root.buildRows()
+    root.settleSelection(keep ? root.keyFor(keep) : "")
+  }
+
+  function settleSelection(keep) {
+    if (root.rows.length === 0) {
+      root.selectedIndex = 0
+      return
+    }
+    if (keep !== "") {
+      for (var k = 0; k < root.rows.length; k++) {
+        if (root.rows[k].type === "session" && root.rows[k].data &&
+            root.keyFor(root.rows[k].data) === keep) {
+          root.selectedIndex = k
+          return
+        }
+      }
+    }
+    if (root.selectedIndex >= 0 && root.selectedIndex < root.rows.length &&
+        root.rows[root.selectedIndex].type === "session")
+      return
+    for (var j = 0; j < root.rows.length; j++) {
+      if (root.rows[j].type === "session") {
+        root.selectedIndex = j
+        return
+      }
+    }
+    root.selectedIndex = 0
+  }
+
+  function stepSelection(dy) {
+    if (root.rows.length === 0) return
+    var i = root.selectedIndex + dy
+    while (i >= 0 && i < root.rows.length && root.rows[i].type !== "session") i += dy
+    if (i < 0 || i >= root.rows.length) return
+    root.selectedIndex = i
+  }
+
+  function sessionFromIndex(i) {
+    if (i >= 0 && i < root.rows.length && root.rows[i].type === "session")
+      return root.rows[i].data
+    return null
   }
 
   function sessionMatches(s, q) {
@@ -81,6 +189,7 @@ Panel {
       searchField.text = ""
       searchField.focus = false
     }
+    root.loadPins()
     refresh()
   }
   function openFromHotkey() { open() }
@@ -92,8 +201,8 @@ Panel {
     return false
   }
 
-  function refresh() {
-    root.selectedIndex = 0
+  function refresh(keepSelection) {
+    if (!keepSelection) root.selectedIndex = 0
     if (!listProc.running) {
       root.scanLimited = false
       root.scanNotice = ""
@@ -114,6 +223,25 @@ Panel {
     if (panel.focusTarget) panel.focusTarget.forceActiveFocus()
   }
 
+  function loadPins() {
+    if (root.pinsLoaded || pinsProc.running) return
+    pinsProc.running = true
+  }
+
+  function togglePin(s) {
+    if (!s) return
+    var key = root.keyFor(s)
+    var idx = root.pins.indexOf(key)
+    if (idx === -1)
+      root.pins = root.pins.concat([key])
+    else {
+      var copy = root.pins.slice()
+      copy.splice(idx, 1)
+      root.pins = copy
+    }
+    root.runAction("pin", s)
+  }
+
   function cycleFilter(step) {
     var keys = ["all"].concat(root.agents.map(a => a.agent))
     var i = keys.indexOf(root.filter)
@@ -123,7 +251,8 @@ Panel {
   }
 
   function resumeSelected() {
-    if (root.shown.length > 0) resumeSession(root.shown[root.selectedIndex])
+    var s = root.selected()
+    if (s) resumeSession(s)
   }
 
   function resumeSession(s) {
@@ -133,7 +262,7 @@ Panel {
   }
 
   function selected() {
-    return root.shown.length > 0 ? root.shown[root.selectedIndex] : null
+    return root.sessionFromIndex(root.selectedIndex)
   }
 
   function runAction(action, s) {
@@ -237,10 +366,35 @@ Panel {
           root.scanLimited = true
           root.scanNotice = "Could not read session results"
         }
-        if (root.selectedIndex >= root.shown.length)
-          root.selectedIndex = Math.max(0, root.shown.length - 1)
+        root.settleSelection("")
       }
     }
+  }
+
+  Process {
+    id: pinsProc
+    command: ["python3", root.helper, "pins"]
+    onRunningChanged: running ? actionDeadline.restart() : actionDeadline.stop()
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.pinsLoaded = true
+        try {
+          var parsed = JSON.parse(text)
+          if (Array.isArray(parsed)) root.pins = parsed
+        } catch (e) {
+          root.pins = []
+        }
+      }
+    }
+  }
+
+  Timer {
+    id: autoRefresh
+    interval: 20000
+    repeat: true
+    running: root.opened
+    onTriggered: { if (!root.scanning) root.refresh(true) }
   }
 
   KeyboardPanel {
@@ -260,14 +414,14 @@ Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onMoveRequested: function(dx, dy) {
-        if (dy !== 0 && root.shown.length > 0)
-          root.selectedIndex = Math.max(0, Math.min(root.shown.length - 1, root.selectedIndex + dy))
+        if (dy !== 0) root.stepSelection(dy)
         if (dx !== 0) root.cycleFilter(dx)
       }
       onReturnRequested: root.resumeSelected()
       onActivateRequested: root.resumeSelected()
       onTextKey: function(text) {
         if (text === "r") root.refresh()
+        else if (text === "f") root.togglePin(root.selected())
         else if (text === "p") root.runAction("peek", root.selected())
         else if (text === "o") root.runAction("folder", root.selected())
         else if (text === "/") root.openSearch()
@@ -429,7 +583,7 @@ text: root.scanning ? "Scanning agents…"
 
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: root.shown.length + "/" + root.sessions.length
+              text: root.matchCount + "/" + root.sessions.length
               color: root.dimmed
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.caption
@@ -459,7 +613,7 @@ text: root.scanning ? "Scanning agents…"
 
         PanelSeparator { width: parent.width }
 
-        // ---- Session rows (scrollable).
+        // ---- Session rows (scrollable, pinned + recency grouped).
         ListView {
           id: sessionList
           width: parent.width
@@ -467,31 +621,52 @@ text: root.scanning ? "Scanning agents…"
           clip: true
           spacing: Style.space(2)
           boundsBehavior: Flickable.StopAtBounds
-          model: root.shown
+          model: root.rows
 
           delegate: Rectangle {
             id: row
             required property var modelData
             required property int index
-            readonly property bool current: index === root.selectedIndex
+            readonly property bool isSession: modelData.type === "session"
+            readonly property bool isHeader: modelData.type === "header"
+            readonly property bool isDivider: modelData.type === "divider"
+            readonly property var session: row.isSession ? modelData.data : null
+            readonly property bool current: row.isSession && index === root.selectedIndex
 
             width: sessionList.width
-            height: rowContent.implicitHeight + Style.space(16)
+            height: row.isDivider ? Style.space(8)
+              : (row.isHeader ? Style.space(26)
+                : rowContent.implicitHeight + Style.space(16))
             radius: Style.cornerRadius
-            color: (current || rowArea.containsMouse)
-              ? Style.hoverFillFor(root.fg, Color.accent) : "transparent"
+            color: !row.isSession ? "transparent"
+              : ((current || rowArea.containsMouse)
+                ? Style.hoverFillFor(root.fg, Color.accent) : "transparent")
 
+            // Section header row (Pinned / Today · n / ...).
+            Text {
+              visible: row.isHeader
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(16)
+              anchors.verticalCenter: parent.verticalCenter
+              text: row.modelData.label
+              textFormat: Text.PlainText
+              color: root.faint
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
 
             // Agent logo badge in the vendor's brand color.
             Rectangle {
               id: badge
-              readonly property color brand: String(row.modelData.color || "") !== ""
-                ? row.modelData.color : Color.accent
+              visible: row.isSession
+              readonly property color brand: String(row.session.color || "") !== ""
+                ? row.session.color : Color.accent
               anchors.left: parent.left
               anchors.leftMargin: Style.space(14)
               anchors.top: parent.top
               anchors.topMargin: Style.space(8)
-              readonly property bool hasLogo: String(row.modelData.iconFile || "") !== ""
+              readonly property bool hasLogo: String(row.session.iconFile || "") !== ""
               width: Style.space(34)
               height: Style.space(30)
               radius: Style.cornerRadius
@@ -500,7 +675,7 @@ text: root.scanning ? "Scanning agents…"
               Image {
                 anchors.centerIn: parent
                 visible: badge.hasLogo
-                source: badge.hasLogo ? Qt.resolvedUrl(row.modelData.iconFile) : ""
+                source: badge.hasLogo ? Qt.resolvedUrl(row.session.iconFile) : ""
                 width: Style.space(17)
                 height: Style.space(17)
                 sourceSize: Qt.size(Style.space(17) * 2, Style.space(17) * 2)
@@ -510,10 +685,10 @@ text: root.scanning ? "Scanning agents…"
               Text {
                 anchors.centerIn: parent
                 visible: !badge.hasLogo
-                text: row.modelData.icon || row.modelData.badge
+                text: row.session.icon || row.session.badge
                 color: badge.brand
-                font.family: String(row.modelData.iconFont || "") !== ""
-                  ? row.modelData.iconFont
+                font.family: String(row.session.iconFont || "") !== ""
+                  ? row.session.iconFont
                   : (root.bar ? root.bar.fontFamily : Style.font.family)
                 font.pixelSize: Style.font.body
               }
@@ -521,6 +696,7 @@ text: root.scanning ? "Scanning agents…"
 
             Column {
               id: rowContent
+              visible: row.isSession
               // Above the row-wide MouseArea so the control pills get clicks.
               z: 1
               anchors.left: badge.right
@@ -533,7 +709,7 @@ text: root.scanning ? "Scanning agents…"
               Text {
                 id: rowTitle
                 width: parent.width
-                text: row.modelData.title
+                text: row.session.title
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 color: root.fg
@@ -545,7 +721,7 @@ text: root.scanning ? "Scanning agents…"
               Text {
                 id: rowSub
                 width: parent.width
-                text: row.modelData.agentName + " · " + row.modelData.dirShort
+                text: row.session.agentName + " · " + row.session.dirShort
                 textFormat: Text.PlainText
                 elide: Text.ElideMiddle
                 color: root.dimmed
@@ -556,8 +732,8 @@ text: root.scanning ? "Scanning agents…"
               // Metadata line, shown on the selected row.
               Text {
                 width: parent.width
-                visible: row.current && String(row.modelData.meta || "") !== ""
-                text: String(row.modelData.meta || "")
+                visible: row.current && String(row.session.meta || "") !== ""
+                text: String(row.session.meta || "")
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 color: root.dimmed
@@ -574,14 +750,17 @@ text: root.scanning ? "Scanning agents…"
                 Repeater {
                   model: {
                     if (!row.current) return []
-                    var acts = [{key: "resume", label: "↵ Resume", danger: false}]
-                    if (row.modelData.canPeek)
+                    var acts = [{key: "pin",
+                      label: root.isPinned(row.session) ? "★ Pinned" : "☆ Pin",
+                      danger: false}]
+                    acts.push({key: "resume", label: "↵ Resume", danger: false})
+                    if (row.session.canPeek)
                       acts.push({key: "peek", label: "p Peek", danger: false})
                     acts.push({key: "folder", label: "o Folder", danger: false})
                     acts.push({key: "copy",
-                      label: root.copiedIndex === row.index ? "✓ Copied" : "y Copy ID",
+                      label: root.copiedIndex === row.index ? "✓ Copied" : "y Copy",
                       danger: false})
-                    if (row.modelData.canDelete)
+                    if (row.session.canDelete)
                       acts.push({key: "delete",
                         label: root.confirmingDelete ? "d Sure?" : "d Delete",
                         danger: true})
@@ -620,9 +799,10 @@ text: root.scanning ? "Scanning agents…"
                       cursorShape: Qt.PointingHandCursor
                       onClicked: {
                         var key = parent.modelData.key
-                        if (key === "resume") root.resumeSession(row.modelData)
+                        if (key === "pin") root.togglePin(row.session)
+                        else if (key === "resume") root.resumeSession(row.session)
                         else if (key === "delete") root.requestDelete()
-                        else root.runAction(key, row.modelData)
+                        else root.runAction(key, row.session)
                       }
                     }
                   }
@@ -632,10 +812,11 @@ text: root.scanning ? "Scanning agents…"
 
             Text {
               id: rowAge
+              visible: row.isSession
               anchors.right: parent.right
               anchors.rightMargin: Style.space(16)
               anchors.verticalCenter: parent.verticalCenter
-              text: root.fmtAge(modelData.mtime)
+              text: root.fmtAge(row.session.mtime)
               color: root.dimmed
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.bodySmall
@@ -643,6 +824,7 @@ text: root.scanning ? "Scanning agents…"
 
             MouseArea {
               id: rowArea
+              visible: row.isSession
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
@@ -655,7 +837,7 @@ text: root.scanning ? "Scanning agents…"
                   root.selectedIndex = row.index
                 }
               }
-              onClicked: root.resumeSession(row.modelData)
+              onClicked: root.resumeSession(row.session)
             }
           }
         }
@@ -664,7 +846,7 @@ text: root.scanning ? "Scanning agents…"
         Text {
           width: parent.width - Style.space(32)
           x: Style.space(16)
-          visible: !root.scanning && root.shown.length === 0
+          visible: !root.scanning && root.matchCount === 0
           text: root.query.trim() !== ""
           ? "No sessions match your search."
           : "Nothing here yet — sessions appear after you use an agent."
@@ -685,7 +867,7 @@ text: root.scanning ? "Scanning agents…"
             anchors.right: parent.right
             anchors.rightMargin: Style.space(16)
             anchors.verticalCenter: parent.verticalCenter
-            text: "↵ resume · p peek · o folder · y copy · d delete ×2 · ←/→ agent · / search · r rescan · esc"
+            text: "↵ resume · f pin · p peek · o folder · y copy · d delete ×2 · ←/→ agent · / search · r rescan · esc"
             color: root.dimmed
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.caption

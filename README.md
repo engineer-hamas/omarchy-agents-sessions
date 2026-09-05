@@ -26,7 +26,9 @@ unsandboxed).
   `~/.copilot/`, `~/.pi/agent/sessions/`, `~/.gemini/tmp/`, Grok's
   `$GROK_HOME/sessions/` (or `~/.grok/sessions/`), and opencode's sqlite
   database (opened read-only). Local reads only; **no network access, no
-  telemetry, nothing written to disk**.
+  telemetry**. Scanning writes nothing to disk; the only persistent state is
+  the pinned-sessions list at
+  `~/.local/state/engineer-hamas.agents-sessions/pins.json`.
 - Shows resumable top-level conversations, not worker sessions. It uses each
   agent's native hierarchy marker: Codex thread metadata, Claude sidechains,
   opencode's `parent_id`, Gemini's nested/kind metadata, and Grok's
@@ -116,8 +118,14 @@ omarchy plugin add https://github.com/engineer-hamas/omarchy-agents-sessions.git
 | `o` | Open the session's folder |
 | `y` | Copy the session id |
 | `d` `d` | Delete the session (double-press to confirm) |
+| `f` or `★` pill | Pin/unpin the session (pinned rows stay on top, persisted) |
 | `r` | Rescan |
 | `Esc` | Close panel |
+
+Sessions are grouped as **Pinned**, then **Today / Yesterday / Past week /
+Earlier**, and the list **auto-refreshes every 20 seconds** while the panel is
+open (selection is preserved across refreshes). `y` copies both the session id
+and its title.
 
 IPC target for keybindings: `omarchy-shell engineer-hamas.agents-sessions toggle`.
 

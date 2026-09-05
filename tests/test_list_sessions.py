@@ -605,5 +605,43 @@ class ScannerTests(unittest.TestCase):
         self.assertNotIn("\x1b]52;", rendered)
 
 
+class PinStateTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.old_state = os.environ.get("XDG_STATE_HOME")
+        os.environ["XDG_STATE_HOME"] = self.temp.name
+        self.state_dir = Path(self.temp.name) / "engineer-hamas.agents-sessions"
+
+    def tearDown(self):
+        if self.old_state is None:
+            os.environ.pop("XDG_STATE_HOME", None)
+        else:
+            os.environ["XDG_STATE_HOME"] = self.old_state
+        self.temp.cleanup()
+
+    def test_pins_list_is_empty_by_default(self):
+        self.assertEqual(SESSIONS.read_pins(), [])
+
+    def test_pin_toggles_and_persists(self):
+        SESSIONS.pin_toggle("opencode", "ses_1")
+        SESSIONS.pin_toggle("copilot", "cp_2")
+        self.assertEqual(SESSIONS.read_pins(), ["opencode:ses_1", "copilot:cp_2"])
+
+        SESSIONS.pin_toggle("opencode", "ses_1")
+        self.assertEqual(SESSIONS.read_pins(), ["copilot:cp_2"])
+
+    def test_pins_subcommand_prints_json_array(self):
+        SESSIONS.pin_toggle("gemini", "gm_3")
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            SESSIONS.pins_list()
+        self.assertEqual(json.loads(output.getvalue()), ["gemini:gm_3"])
+
+    def test_write_is_atomic_and_idempotent(self):
+        SESSIONS.pin_toggle("codex", "cx_4")
+        SESSIONS.pin_toggle("codex", "cx_4")
+        self.assertEqual(SESSIONS.read_pins(), [])
+        self.assertFalse((self.state_dir / "pins.json.tmp").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

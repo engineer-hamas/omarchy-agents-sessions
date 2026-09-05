@@ -60,7 +60,7 @@ BarWidget {
     text: ""
     slotSize: Style.bar.statusSlot
     fontSize: Style.font.caption
-    tooltipText: "Session Browser — resume past AI agent sessions"
+    tooltipText: "Agents Session — resume AI agents sessions"
 
     onPressed: function(buttonCode) {
       root.togglePanel()
